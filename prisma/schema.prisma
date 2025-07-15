@@ -68,6 +68,7 @@ model Specialty {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
+  imageUrl    String?
   doctors     User[]   @relation("DoctorSpecialties")
   appointments Appointment[] @relation("AppointmentSpecialty")
   createdAt   DateTime @default(now())
@@ -83,6 +84,7 @@ model Service {
   code         String   @unique
   name         String
   description  String?
+  imageUrl    String?
   price        Float
   duration     Int?     // Duration in minutes
   createdAt    DateTime @default(now())

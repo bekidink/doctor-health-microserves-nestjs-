@@ -9,14 +9,12 @@ export class AuditLogService {
     action: string,
     details: Record<string, any>,
     userId?: string,
-    serviceId?: string,
   ): Promise<void> {
     await this.prisma.auditLog.create({
       data: {
         action,
         details,
         userId,
-        serviceId,
         createdAt: new Date(),
       },
     });
