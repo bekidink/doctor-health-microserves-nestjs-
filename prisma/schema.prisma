@@ -1,0 +1,350 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums for fixed-value fields
+enum UserRole {
+  PATIENT
+  DOCTOR
+  ADMIN
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  IN_PERSON
+  TELEHEALTH
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum NotificationType {
+  PUSH
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  FULFILLED
+  EXPIRED
+}
+
+enum ReportType {
+  APPOINTMENT_STATS
+  SPECIALTY_STATS
+  SERVICE_USAGE
+  PATIENT_TRENDS
+  SYSTEM_HEALTH
+}
+
+model Specialty {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  doctors     User[]   @relation("DoctorSpecialties")
+  appointments Appointment[] @relation("AppointmentSpecialty")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  auditLogs   AuditLog[] @relation("SpecialtyAuditLogs")
+
+  @@index([name])
+  @@map("specialties")
+}
+
+model Service {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  name         String
+  description  String?
+  price        Float
+  duration     Int?     // Duration in minutes
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  appointments Appointment[] @relation("AppointmentService")
+  invoices     Invoice[]     @relation("InvoiceService")
+  prescriptions Prescription[] @relation("PrescriptionService")
+  patientRecords PatientRecord[] @relation("RecordService")
+  notifications Notification[] @relation("ServiceNotifications")
+  recommendations Recommendation[] @relation("RecommendationService")
+  auditLogs     AuditLog[] @relation("ServiceAuditLogs")
+
+  @@index([code])
+  @@index([name(text)])
+  @@map("services")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String   // Hashed at application layer
+  role         UserRole
+  profile      Json     // e.g., { "firstName": "John", "license": "MD123", "dob": "1980-01-01" }
+  specialties  Specialty[] @relation("DoctorSpecialties")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  appointmentsAsPatient Appointment[] @relation("PatientAppointments")
+  appointmentsAsDoctor Appointment[] @relation("DoctorAppointments")
+  sessionsAsPatient Session[] @relation("PatientSessions")
+  sessionsAsDoctor Session[] @relation("DoctorSessions")
+  prescriptionsAsPatient Prescription[] @relation("PatientPrescriptions")
+  prescriptionsAsDoctor Prescription[] @relation("DoctorPrescriptions")
+  notifications Notification[] @relation("UserNotifications")
+  invoices      Invoice[] @relation("PatientInvoices")
+  patientRecords PatientRecord[] @relation("PatientRecords")
+  recommendationsAsPatient Recommendation[] @relation("PatientRecommendations")
+  recommendationsAsDoctor Recommendation[] @relation("DoctorRecommendations")
+  reports       Report[] @relation("GeneratedReports")
+  auditLogs     AuditLog[] @relation("UserAuditLogs")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+  Message Message[] @relation("SenderMessages")
+}
+
+model Appointment {
+  id          String   @id @default(uuid())
+  patientId   String
+  doctorId    String
+  serviceId   String?
+  specialtyId String?
+  startTime   DateTime
+  endTime     DateTime
+  status      AppointmentStatus
+  type        AppointmentType
+  notes       String?   // Optional notes (encrypted for PHI)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  patient     User     @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
+  doctor      User     @relation("DoctorAppointments", fields: [doctorId], references: [id], onDelete: Restrict)
+  service     Service? @relation("AppointmentService", fields: [serviceId], references: [id], onDelete: SetNull)
+  specialty   Specialty? @relation("AppointmentSpecialty", fields: [specialtyId], references: [id], onDelete: SetNull)
+  session     Session? @relation("AppointmentSession")
+  notifications Notification[] @relation("AppointmentNotifications")
+  invoice     Invoice? @relation("AppointmentInvoice")
+  auditLogs   AuditLog[] @relation("AppointmentAuditLogs")
+
+  @@index([patientId, doctorId])
+  @@index([startTime])
+  @@index([serviceId])
+  @@index([specialtyId])
+  @@index([status])
+  @@map("appointments")
+}
+
+model PatientRecord {
+  id          String   @id @default(uuid())
+  patientId   String
+  serviceId   String?
+  data        Json     // FHIR-compliant JSON (encrypted)
+  fhirVersion String   // e.g., "R4"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  patient     User     @relation("PatientRecords", fields: [patientId], references: [id], onDelete: Restrict)
+  service     Service? @relation("RecordService", fields: [serviceId], references: [id], onDelete: SetNull)
+  auditLogs   AuditLog[] @relation("RecordAuditLogs")
+
+  @@index([patientId])
+  @@index([serviceId])
+  @@index([createdAt])
+  @@map("patient_records")
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  appointmentId String   @unique
+  patientId   String
+  doctorId    String
+  startTime   DateTime
+  endTime     DateTime?
+  status      SessionStatus
+  metadata    Json     // e.g., WebRTC session details
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  appointment Appointment @relation("AppointmentSession", fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient     User     @relation("PatientSessions", fields: [patientId], references: [id], onDelete: Restrict)
+  doctor      User     @relation("DoctorSessions", fields: [doctorId], references: [id], onDelete: Restrict)
+  messages    Message[] @relation("SessionMessages")
+  auditLogs   AuditLog[] @relation("SessionAuditLogs")
+
+  @@index([patientId, doctorId])
+  @@index([startTime])
+  @@index([status])
+  @@map("sessions")
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  sessionId   String
+  senderId    String
+  content     String   // Encrypted at application layer
+  sentAt      DateTime @default(now())
+  session     Session  @relation("SessionMessages", fields: [sessionId], references: [id], onDelete: Cascade)
+  sender      User     @relation("SenderMessages", fields: [senderId], references: [id], onDelete: Restrict)
+  auditLogs   AuditLog[] @relation("MessageAuditLogs")
+
+  @@index([sessionId])
+  @@index([sentAt])
+  @@map("messages")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  appointmentId String?
+  serviceId   String?
+  content     String   // e.g., "Your blood test results are ready"
+  type        NotificationType
+  status      NotificationStatus
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Restrict)
+  appointment Appointment? @relation("AppointmentNotifications", fields: [appointmentId], references: [id], onDelete: SetNull)
+  service     Service? @relation("ServiceNotifications", fields: [serviceId], references: [id], onDelete: SetNull)
+  auditLogs   AuditLog[] @relation("NotificationAuditLogs")
+
+  @@index([userId])
+  @@index([sentAt])
+  @@index([status])
+  @@map("notifications")
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  patientId   String
+  appointmentId String?  @unique
+  serviceId   String?
+  amount      Float
+  status      InvoiceStatus
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  patient     User     @relation("PatientInvoices", fields: [patientId], references: [id], onDelete: Restrict)
+  appointment Appointment? @relation("AppointmentInvoice", fields: [appointmentId], references: [id], onDelete: SetNull)
+  service     Service? @relation("InvoiceService", fields: [serviceId], references: [id], onDelete: SetNull)
+  auditLogs   AuditLog[] @relation("InvoiceAuditLogs")
+
+  @@index([patientId])
+  @@index([serviceId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model Prescription {
+  id          String   @id @default(uuid())
+  patientId   String
+  doctorId    String
+  serviceId   String?
+  medication  String
+  dosage      String
+  instructions String?
+  status      PrescriptionStatus
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  patient     User     @relation("PatientPrescriptions", fields: [patientId], references: [id], onDelete: Restrict)
+  doctor      User     @relation("DoctorPrescriptions", fields: [doctorId], references: [id], onDelete: Restrict)
+  service     Service? @relation("PrescriptionService", fields: [serviceId], references: [id], onDelete: SetNull)
+  auditLogs   AuditLog[] @relation("PrescriptionAuditLogs")
+
+  @@index([patientId, doctorId])
+  @@index([serviceId])
+  @@index([status])
+  @@map("prescriptions")
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  type        ReportType
+  data        Json     // e.g., { "specialty": "Cardiology", "appointments": 50 }
+  createdAt   DateTime @default(now())
+  generatedBy String
+  user        User     @relation("GeneratedReports", fields: [generatedBy], references: [id], onDelete: Restrict)
+  auditLogs   AuditLog[] @relation("ReportAuditLogs")
+
+  @@index([type, createdAt])
+  @@map("reports")
+}
+
+model Recommendation {
+  id          String   @id @default(uuid())
+  patientId   String
+  doctorId    String
+  serviceId   String?
+  data        Json     // e.g., { "diagnosis": "Hypertension", "treatment": "Lisinopril" }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  patient     User     @relation("PatientRecommendations", fields: [patientId], references: [id], onDelete: Restrict)
+  doctor      User     @relation("DoctorRecommendations", fields: [doctorId], references: [id], onDelete: Restrict)
+  service     Service? @relation("RecommendationService", fields: [serviceId], references: [id], onDelete: SetNull)
+  auditLogs   AuditLog[] @relation("RecommendationAuditLogs")
+
+  @@index([patientId, doctorId])
+  @@index([serviceId])
+  @@map("recommendations")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  recordId    String?
+  serviceId   String?
+  specialtyId String?
+  appointmentId String?
+  sessionId   String?
+  messageId   String?
+  notificationId String?
+  invoiceId   String?
+  prescriptionId String?
+  reportId    String?
+  recommendationId String?
+  action      String   // e.g., "create_specialty", "read_ehr"
+  details     Json     // e.g., { "endpoint": "/specialties", "ip": "192.168.1.1" }
+  createdAt   DateTime @default(now())
+  user        User?    @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: SetNull)
+  record      PatientRecord? @relation("RecordAuditLogs", fields: [recordId], references: [id], onDelete: SetNull)
+  service     Service? @relation("ServiceAuditLogs", fields: [serviceId], references: [id], onDelete: SetNull)
+  specialty   Specialty? @relation("SpecialtyAuditLogs", fields: [specialtyId], references: [id], onDelete: SetNull)
+  appointment Appointment? @relation("AppointmentAuditLogs", fields: [appointmentId], references: [id], onDelete: SetNull)
+  session     Session? @relation("SessionAuditLogs", fields: [sessionId], references: [id], onDelete: SetNull)
+  message     Message? @relation("MessageAuditLogs", fields: [messageId], references: [id], onDelete: SetNull)
+  notification Notification? @relation("NotificationAuditLogs", fields: [notificationId], references: [id], onDelete: SetNull)
+  invoice     Invoice? @relation("InvoiceAuditLogs", fields: [invoiceId], references: [id], onDelete: SetNull)
+  prescription Prescription? @relation("PrescriptionAuditLogs", fields: [prescriptionId], references: [id], onDelete: SetNull)
+  report      Report? @relation("ReportAuditLogs", fields: [reportId], references: [id], onDelete: SetNull)
+  recommendation Recommendation? @relation("RecommendationAuditLogs", fields: [recommendationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([recordId])
+  @@index([serviceId])
+  @@index([specialtyId])
+  @@index([appointmentId])
+  @@index([sessionId])
+  @@index([action])
+  @@map("audit_logs")
+}
